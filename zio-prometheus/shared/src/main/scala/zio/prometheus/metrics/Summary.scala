@@ -2,7 +2,7 @@ package zio.prometheus.metrics
 
 import io.prometheus.client.CollectorRegistry
 import izumi.reflect.Tag
-import zio.prometheus.metrics.Summary.{Metric, Registered, WithMetricBuilder, WithoutMetricBuilder}
+import zio.prometheus.metrics.Summary.{Registered, WithoutMetricBuilder}
 import zio.{Chunk, Has, UIO, ZIO, ZLayer, ZManaged}
 
 abstract class Summary(val name: String, val help: String, val labels: Chunk[String]) { self =>
@@ -24,7 +24,6 @@ abstract class Summary(val name: String, val help: String, val labels: Chunk[Str
 }
 
 object Summary {
-  type Metric[A <: Summary] = Has[Registered[A]]
 
   final class Registered[A <: Summary] private[prometheus] (private[prometheus] val metric: io.prometheus.client.Summary) {
     def timer: WithMetricBuilder[A] =
@@ -35,8 +34,8 @@ object Summary {
   }
 
   final class WithoutMetricBuilder[A <: Summary: Tag] private[prometheus] {
-    def apply[R <: Summary.Metric[A], E, B](zio: ZIO[R, E, B]): ZIO[R, E, B] =
-      ZManaged.accessManaged[Summary.Metric[A]](e =>
+    def apply[R <: Has[Registered[A]], E, B](zio: ZIO[R, E, B]): ZIO[R, E, B] =
+      ZManaged.accessManaged[Has[Registered[A]]](e =>
         (ZManaged.makeEffect(e.get.metric.startTimer())(_.observeDuration()))).ignore.use_(zio)
   }
 

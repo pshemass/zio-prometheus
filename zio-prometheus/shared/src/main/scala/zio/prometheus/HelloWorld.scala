@@ -14,7 +14,7 @@ object HelloWorld extends App {
 
   val myAppLogic =
     for {
-      _ <- metrics.inc(requestCounter)
+      _ <- requestCounter.inc
       _    <- putStrLn("Hello! What is your name?")
       name <- getStrLn
       _    <- putStrLn(s"Hello, $name, welcome to ZIO!")

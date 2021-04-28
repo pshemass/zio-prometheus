@@ -23,13 +23,11 @@ abstract class Histogram(val name: String, val help: String, val labels: Chunk[S
 }
 
 object Histogram {
-  type Metric[A <: Histogram] = Has[Registered[A]]
-
   final class Registered[A <: Histogram] private[prometheus] (private[prometheus] val metric: io.prometheus.client.Histogram)
 
   private[prometheus] final class WithoutMetricBuilder[A <: Histogram: Tag] {
-    def apply[R <: Histogram.Metric[A], E, B](zio: ZIO[R, E, B]): ZIO[R, E, B] =
-      ZManaged.accessManaged[Histogram.Metric[A]](e =>
+    def apply[R <: Has[Registered[A]], E, B](zio: ZIO[R, E, B]): ZIO[R, E, B] =
+      ZManaged.accessManaged[Has[Registered[A]]](e =>
         (ZManaged.makeEffect(e.get.metric.startTimer())(_.observeDuration()))).ignore.use_(zio)
   }
 

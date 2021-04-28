@@ -29,7 +29,6 @@ abstract class Gauge(val name: String, val help: String, val labels: Chunk[Strin
 }
 
 object Gauge {
-  type Metric[A <: Gauge] = Has[Registered[A]]
 
   final class Registered[A <: Gauge] private[prometheus] (private[prometheus] val metric: io.prometheus.client.Gauge) {
     def inc(value: Double): UIO[Unit] = ZIO.succeed(metric.inc(value))
