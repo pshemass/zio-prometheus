@@ -4,15 +4,15 @@ import io.prometheus.client.CollectorRegistry
 import zio.prometheus.metrics.Counter.Registered
 import zio.{Has, Tag, UIO, ZIO, ZLayer}
 
-abstract class Counter[A <: Labels : Tag](val name: String, val help: String, labels: A) {
+abstract class Counter[A <: Labels : Tag](val name: String, val help: String, labelNames: A) {
   self =>
   type Metric = Has[Registered[A, self.type]]
 
   def inc(labels: A): ZIO[Metric, Nothing, Unit] =
-    ZIO.access[Metric](_.get.metric.inc())
+    ZIO.access[Metric](_.get.metric.labels(labels.asSeq: _*).inc())
 
   final def inc(value: Double, labels: A): ZIO[Metric, Nothing, Unit] =
-    ZIO.access[Metric](_.get.metric.inc(value))
+    ZIO.access[Metric](_.get.metric.labels(labels.asSeq: _*).inc(value))
 
   final def fromEnv[R <: Metric](env: R): Registered[A, self.type] =
     env.get[Registered[A, self.type]]
@@ -23,7 +23,7 @@ abstract class Counter[A <: Labels : Tag](val name: String, val help: String, la
         io.prometheus.client.Counter.build()
           .name(self.name)
           .help(help)
-          .labelNames(labels.asSeq:_*)
+          .labelNames(labelNames.asSeq: _*)
           .register(reg.get))
     )
 }
@@ -31,9 +31,9 @@ abstract class Counter[A <: Labels : Tag](val name: String, val help: String, la
 object Counter {
 
   final class Registered[B <: Labels, A <: Counter[B]] private[prometheus](private[prometheus] val metric: io.prometheus.client.Counter) {
-    def inc(labels: B): UIO[Unit] = ZIO.succeed(metric.inc())
+    def inc(labels: B): UIO[Unit] = ZIO.succeed(metric.labels(labels.asSeq: _*).inc())
 
-    def inc(value: Double, labels: B): UIO[Unit] = ZIO.succeed(metric.inc(value))
+    def inc(value: Double, labels: B): UIO[Unit] = ZIO.succeed(metric.labels(labels.asSeq: _*).inc(value))
   }
 
 }

@@ -3,45 +3,52 @@ package zio.prometheus.metrics
 import io.prometheus.client.CollectorRegistry
 import izumi.reflect.Tag
 import zio.prometheus.metrics.Summary.{Registered, WithoutMetricBuilder}
-import zio.{Chunk, Has, UIO, ZIO, ZLayer, ZManaged}
+import zio.{Has, UIO, ZIO, ZLayer, ZManaged}
 
-abstract class Summary(val name: String, val help: String, val labels: Chunk[String]) { self =>
+abstract class Summary[A <: Labels: Tag](val name: String, val help: String, labelNames: A) {
+  self =>
 
-  type Metric = Has[Registered[self.type]]
+  type Metric = Has[Registered[A, self.type]]
 
-  final def timer = new WithoutMetricBuilder[self.type]
+  final def timer(labels: A) = new WithoutMetricBuilder[A, self.type](labels)
 
   final def observe(value: Double): ZIO[Metric, Nothing, Unit] =
     ZIO.access[Metric](_.get.metric.observe(value))
 
-  def register: ZLayer[Has[CollectorRegistry], Nothing, Metric] =
-    ZLayer.fromFunction((reg:Has[CollectorRegistry]) =>
-      new Registered[self.type](
-        io.prometheus.client.Summary.build().name(name).help(help).register(reg.get)
+  final def fromEnv[R <: Metric](env: R): Registered[A, self.type] =
+    env.get[Registered[A, self.type]]
+
+  val register: ZLayer[Has[CollectorRegistry], Nothing, Metric] =
+    ZLayer.fromFunction((reg: Has[CollectorRegistry]) =>
+      new Registered[A, self.type](
+        io.prometheus.client.Summary.build()
+          .name(name)
+          .help(help)
+          .labelNames(labelNames.asSeq:_*)
+          .register(reg.get)
       )
     )
-
 }
 
 object Summary {
 
-  final class Registered[A <: Summary] private[prometheus] (private[prometheus] val metric: io.prometheus.client.Summary) {
-    def timer: WithMetricBuilder[A] =
-      new WithMetricBuilder[A](this)
+  final class Registered[B <: Labels, A <: Summary[B]] private[prometheus](private[prometheus] val metric: io.prometheus.client.Summary) {
+    def timer(labels: B): WithMetricBuilder[B, A] =
+      new WithMetricBuilder[B, A](this, labels)
 
-    def observe(value: Double): UIO[Unit] =
-      ZIO.succeed(metric.observe(value))
+    def observe(value: Double, labels: B): UIO[Unit] =
+      ZIO.succeed(metric.labels(labels.asSeq:_*).observe(value))
   }
 
-  final class WithoutMetricBuilder[A <: Summary: Tag] private[prometheus] {
-    def apply[R <: Has[Registered[A]], E, B](zio: ZIO[R, E, B]): ZIO[R, E, B] =
-      ZManaged.accessManaged[Has[Registered[A]]](e =>
-        (ZManaged.makeEffect(e.get.metric.startTimer())(_.observeDuration()))).ignore.use_(zio)
+  final class WithoutMetricBuilder[B <: Labels: Tag, A <: Summary[B] : Tag] private[prometheus](labels: B) {
+    def apply[R <: Has[Registered[B, A]], E, C](zio: ZIO[R, E, C]): ZIO[R, E, C] =
+      ZManaged.accessManaged[Has[Registered[B, A]]](e =>
+        (ZManaged.makeEffect(e.get.metric.labels(labels.asSeq: _*).startTimer())(_.observeDuration()))).ignore.use_(zio)
   }
 
-  final class WithMetricBuilder[A <: Summary] private[prometheus] (m: Summary.Registered[A]) {
-    def apply[R, E, B](zio: ZIO[R, E, B]): ZIO[R, E, B] =
-      (ZManaged.makeEffect(m.metric.startTimer())(_.observeDuration())).ignore.use_(zio)
+  final class WithMetricBuilder[B <: Labels, A <: Summary[B]] private[prometheus](m: Summary.Registered[B, A], labels: B) {
+    def apply[R, E, C](zio: ZIO[R, E, C]): ZIO[R, E, C] =
+      (ZManaged.makeEffect(m.metric.labels(labels.asSeq: _*).startTimer())(_.observeDuration())).ignore.use_(zio)
   }
 
 }

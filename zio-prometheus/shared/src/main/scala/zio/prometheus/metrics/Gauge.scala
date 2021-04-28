@@ -2,42 +2,42 @@ package zio.prometheus.metrics
 
 import io.prometheus.client.CollectorRegistry
 import zio.prometheus.metrics.Gauge.Registered
-import zio.{Chunk, Has, UIO, ZIO, ZLayer}
+import zio.{Has, Tag, UIO, ZIO, ZLayer}
 
-abstract class Gauge(val name: String, val help: String, val labels: Chunk[String]) { self =>
-  type Metric = Has[Registered[self.type]]
+abstract class Gauge[A <: Labels: Tag](val name: String, val help: String, val labelNames: A) { self =>
+  type Metric = Has[Registered[A, self.type]]
 
-  val inc: ZIO[Metric, Nothing, Unit] =
-    ZIO.access[Metric](_.get.metric.inc())
+  def inc(labels: A): ZIO[Metric, Nothing, Unit] =
+    ZIO.access[Metric](_.get.metric.labels(labels.asSeq: _*).inc())
 
-  final def inc(value: Double): ZIO[Metric, Nothing, Unit] =
-    ZIO.access[Metric](_.get.metric.inc(value))
+  final def inc(value: Double, labels: A): ZIO[Metric, Nothing, Unit] =
+    ZIO.access[Metric](_.get.metric.labels(labels.asSeq: _*).inc(value))
 
-  val dec: ZIO[Metric, Nothing, Unit] =
-    ZIO.access[Metric](_.get.metric.dec())
+  def dec(labels: A): ZIO[Metric, Nothing, Unit] =
+    ZIO.access[Metric](_.get.metric.labels(labels.asSeq: _*).dec())
 
-  final def dec(value: Double): ZIO[Metric, Nothing, Unit] =
-    ZIO.access[Metric](_.get.metric.dec(value))
+  final def dec(value: Double, labels: A): ZIO[Metric, Nothing, Unit] =
+    ZIO.access[Metric](_.get.metric.labels(labels.asSeq: _*).dec(value))
 
-  final def fromEnv[R <: Metric](env: R): Registered[self.type] =
-    env.get[Registered[self.type ]]
+  final def fromEnv[R <: Metric](env: R): Registered[A, self.type] =
+    env.get[Registered[A, self.type ]]
 
   val register: ZLayer[Has[CollectorRegistry], Nothing, Metric] =
     ZLayer.fromFunction((reg:Has[CollectorRegistry]) =>
-      new Registered[self.type](io.prometheus.client.Gauge.build().name(self.name).help(help).register(reg.get))
+      new Registered[A, self.type](io.prometheus.client.Gauge.build().name(self.name).help(help).register(reg.get))
     )
 }
 
 object Gauge {
 
-  final class Registered[A <: Gauge] private[prometheus] (private[prometheus] val metric: io.prometheus.client.Gauge) {
-    def inc(value: Double): UIO[Unit] = ZIO.succeed(metric.inc(value))
+  final class Registered[B <: Labels, A <: Gauge[B]] private[prometheus] (private[prometheus] val metric: io.prometheus.client.Gauge) {
+    def inc(value: Double, labels: B): UIO[Unit] = ZIO.succeed(metric.labels(labels.asSeq: _*).inc(value))
 
-    def inc: UIO[Unit] = ZIO.succeed(metric.inc())
+    def inc(labels: B): UIO[Unit] = ZIO.succeed(metric.labels(labels.asSeq: _*).inc())
 
-    def dec(value: Double): UIO[Unit] = ZIO.succeed(metric.dec(value))
+    def dec(value: Double, labels: B): UIO[Unit] = ZIO.succeed(metric.labels(labels.asSeq: _*).dec(value))
 
-    def dec: UIO[Unit] = ZIO.succeed(metric.dec())
+    def dec(labels: B): UIO[Unit] = ZIO.succeed(metric.labels(labels.asSeq: _*).dec())
   }
 
 }
