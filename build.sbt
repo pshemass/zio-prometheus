@@ -45,6 +45,7 @@ lazy val zioPrometheus = crossProject(JSPlatform, JVMPlatform)
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio"          % zioVersion,
       "io.prometheus" % "simpleclient" % "0.10.0",
+      "io.prometheus" % "simpleclient_httpserver" % "0.10.0",
       "dev.zio" %% "zio-test"     % zioVersion % "test",
       "dev.zio" %% "zio-test-sbt" % zioVersion % "test"
 

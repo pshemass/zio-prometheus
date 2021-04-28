@@ -10,7 +10,7 @@ abstract class Summary[A <: Labels: Tag](val name: String, val help: String, lab
 
   type Metric = Has[Registered[A, self.type]]
 
-  final def timer(labels: A) = new WithoutMetricBuilder[A, self.type](labels)
+  final def timer(labels: A): WithoutMetricBuilder[A, self.type] = new WithoutMetricBuilder[A, self.type](labels)
 
   final def observe(value: Double): ZIO[Metric, Nothing, Unit] =
     ZIO.access[Metric](_.get.metric.observe(value))
@@ -38,6 +38,14 @@ object Summary {
 
     def observe(value: Double, labels: B): UIO[Unit] =
       ZIO.succeed(metric.labels(labels.asSeq:_*).observe(value))
+  }
+
+  implicit class EmptyLabelOps(val s: Summary[Labels.Empty.type]) extends AnyVal {
+    def timer: WithoutMetricBuilder[Labels.Empty.type, s.type] = s.timer(Labels.Empty)
+  }
+
+  implicit class EmptyLabelRegisteredOps[A <: Summary[Labels.Empty.type]](val s: Registered[Labels.Empty.type, A]) extends AnyVal {
+    def timer: WithMetricBuilder[Labels.Empty.type, A] = s.timer(Labels.Empty)
   }
 
   final class WithoutMetricBuilder[B <: Labels: Tag, A <: Summary[B] : Tag] private[prometheus](labels: B) {

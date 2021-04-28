@@ -35,5 +35,14 @@ object Counter {
 
     def inc(value: Double, labels: B): UIO[Unit] = ZIO.succeed(metric.labels(labels.asSeq: _*).inc(value))
   }
+  implicit class CounterEmptyLabelOps(val s: Counter[Labels.Empty.type]) extends AnyVal {
+    def inc() = ZIO.access[s.Metric](_.get.metric.inc())
+    def inc(value: Double) = ZIO.access[s.Metric](_.get.metric.inc(value))
+  }
+
+  implicit class RegisteredCounterEmptyLabelOps[A <: Counter[Labels.Empty.type]](val s: Registered[Labels.Empty.type, A]) extends AnyVal {
+    def inc() = s.inc(Labels.Empty)
+    def inc(value: Double) = s.inc(value, Labels.Empty)
+  }
 
 }

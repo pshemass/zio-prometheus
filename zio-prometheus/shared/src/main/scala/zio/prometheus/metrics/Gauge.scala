@@ -19,6 +19,9 @@ abstract class Gauge[A <: Labels: Tag](val name: String, val help: String, val l
   final def dec(value: Double, labels: A): ZIO[Metric, Nothing, Unit] =
     ZIO.access[Metric](_.get.metric.labels(labels.asSeq: _*).dec(value))
 
+  final def set(value: Double, labels: A): ZIO[Metric, Nothing, Unit] =
+    ZIO.access[Metric](_.get.metric.labels(labels.asSeq: _*).set(value))
+
   final def fromEnv[R <: Metric](env: R): Registered[A, self.type] =
     env.get[Registered[A, self.type ]]
 
@@ -38,6 +41,8 @@ object Gauge {
     def dec(value: Double, labels: B): UIO[Unit] = ZIO.succeed(metric.labels(labels.asSeq: _*).dec(value))
 
     def dec(labels: B): UIO[Unit] = ZIO.succeed(metric.labels(labels.asSeq: _*).dec())
+
+    def set(value: Double, labels: B): UIO[Unit] = ZIO.succeed(metric.labels(labels.asSeq: _*).set(value))
   }
 
 }
