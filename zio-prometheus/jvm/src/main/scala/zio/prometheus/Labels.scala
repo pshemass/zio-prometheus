@@ -1,4 +1,4 @@
-package zio.prometheus.metrics
+package zio.prometheus
 
 sealed trait Labels extends Product { self =>
   private[prometheus] def asSeq: Seq[String] =
