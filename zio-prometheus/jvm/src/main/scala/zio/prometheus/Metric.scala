@@ -1,33 +1,43 @@
 package zio.prometheus
 
 import io.prometheus.client.{ Collector, CollectorRegistry }
+import zio.prometheus.Metric.MetricsOpsBase
+import zio.prometheus.Summary.SummaryNonEmptyLabelOps
 import zio.{ Has, Tag, URIO, ZIO, ZLayer, ZManaged }
 
-sealed abstract class Metric[A <: Labels: Tag] {
+import scala.language.implicitConversions
+
+sealed abstract class Metric[A <: Labels] {
   self =>
   type Metric = Has[Registered[self.type, A]]
   private[prometheus] type RealMetric <: Collector
 
-  final def fromEnv[R <: Metric](env: R): Registered[self.type, A] =
-    env.get[Registered[self.type, A]]
-
-  private[prometheus] def access(fn: RealMetric => Unit): URIO[Metric, Unit] =
-    ZIO.access[Metric](env => fn(env.get.metric))
-
-  private[prometheus] def accessManaged[B](acquire: RealMetric => B)(release: B => Any) =
-    ZManaged.accessManaged[Metric](e => ZManaged.makeEffect(acquire(e.get.metric))(release))
-
   protected def register(registry: CollectorRegistry): RealMetric
 
-  val register: ZLayer[Has[CollectorRegistry], Nothing, Metric] =
-    ZLayer.fromService((reg: CollectorRegistry) =>
-      new Registered[self.type, A](
-        register(reg)
+}
+object Metric {
+
+  private[prometheus] abstract class MetricsOpsBase[A <: Metric[B]: Tag, B <: Labels: Tag](val metric: A) {
+    type HasMetric = Has[Registered[A, B]]
+    protected final def access(fn: A#RealMetric => Unit): URIO[HasMetric, Unit] =
+      ZIO.access[HasMetric](env => fn(env.get.metric))
+
+    protected final def accessManaged[C](acquire: A#RealMetric => C)(release: C => Any) =
+      ZManaged.accessManaged[HasMetric](e => ZManaged.makeEffect(acquire(e.get.metric))(release))
+
+    final def fromEnv[R <: HasMetric](env: R): Registered[A, B] = env.get
+
+    val register: ZLayer[Has[CollectorRegistry], Nothing, HasMetric] =
+      ZLayer.fromService((reg: CollectorRegistry) =>
+        new Registered[A, B](
+          metric.register(reg)
+        )
       )
-    )
+  }
+
 }
 
-case class Counter[A <: Labels: Tag](val name: String, val help: String, labelNames: A) extends Metric[A] {
+case class Counter[A <: Labels](val name: String, val help: String, labelNames: A) extends Metric[A] {
   self =>
   override private[prometheus] type RealMetric = io.prometheus.client.Counter
 
@@ -42,24 +52,37 @@ case class Counter[A <: Labels: Tag](val name: String, val help: String, labelNa
 
 object Counter {
 
-  implicit class CounterEmptyLabelOps[M <: Has[_]](val counter: Counter[Labels.Empty.type] { type Metric = M })
-      extends AnyVal {
-    def inc(): URIO[M, Unit] = counter.access(_.inc()).asInstanceOf[URIO[M, Unit]]
+  implicit def toCounterEmptyLabelOps(counter: Counter[Labels.Empty.type])(implicit
+    tag: Tag[counter.type]
+  ): CounterEmptyLabelOps[counter.type] =
+    new CounterEmptyLabelOps[counter.type](counter)
 
-    def inc(value: Double): URIO[M, Unit] = counter.access(_.inc(value)).asInstanceOf[URIO[M, Unit]]
+  final class CounterEmptyLabelOps[C <: Counter[Labels.Empty.type]: Tag](val counter: C)
+      extends MetricsOpsBase[C, Labels.Empty.type](counter) {
+    def inc(): URIO[HasMetric, Unit] =
+      access(_.inc())
+
+    def inc(value: Double): URIO[HasMetric, Unit] =
+      access(_.inc(value))
+
   }
 
-  implicit class CounterNonEmptyLabelOps[M <: Has[_], A <: Labels](val counter: Counter[A] { type Metric = M })
-      extends AnyVal {
-    def inc(labels: A): URIO[M, Unit] = counter.access(_.labels(labels.asSeq: _*).inc()).asInstanceOf[URIO[M, Unit]]
+  implicit def toCounterNonEmptyLabelOps[B <: Labels.NonEmpty: Tag](counter: Counter[B])(implicit
+    tag: Tag[counter.type]
+  ): CounterNonEmptyLabelOps[counter.type, B] =
+    new CounterNonEmptyLabelOps[counter.type, B](counter)
 
-    def inc(value: Double, labels: A): URIO[M, Unit] =
-      counter.access(_.labels(labels.asSeq: _*).inc(value)).asInstanceOf[URIO[M, Unit]]
+  final class CounterNonEmptyLabelOps[A <: Counter[B]: Tag, B <: Labels: Tag](val counter: A)
+      extends MetricsOpsBase[A, B](counter) {
+    def inc(labels: B): URIO[HasMetric, Unit] = access(_.labels(labels.asSeq: _*).inc())
+
+    def inc(value: Double, labels: B): URIO[HasMetric, Unit] =
+      access(_.labels(labels.asSeq: _*).inc(value))
   }
 
 }
 
-case class Gauge[A <: Labels: Tag](val name: String, val help: String, labelNames: A) extends Metric[A] {
+case class Gauge[A <: Labels](val name: String, val help: String, labelNames: A) extends Metric[A] {
   self =>
   override private[prometheus] type RealMetric = io.prometheus.client.Gauge
 
@@ -74,38 +97,48 @@ case class Gauge[A <: Labels: Tag](val name: String, val help: String, labelName
 
 object Gauge {
 
-  implicit class GaugeEmptyLabelOps[M <: Has[_]](val metric: Gauge[Labels.Empty.type] { type Metric = M })
-      extends AnyVal {
-    def inc(): URIO[M, Unit] = metric.access(_.inc()).asInstanceOf[URIO[M, Unit]]
+  implicit def toGaugeEmptyLabelOps(metric: Gauge[Labels.Empty.type])(implicit
+    tag: Tag[metric.type]
+  ): GaugeEmptyLabelOps[metric.type] =
+    new GaugeEmptyLabelOps[metric.type](metric)
 
-    def dec(): URIO[M, Unit] = metric.access(_.dec()).asInstanceOf[URIO[M, Unit]]
+  final class GaugeEmptyLabelOps[A <: Gauge[Labels.Empty.type]: Tag](metric: A)
+      extends MetricsOpsBase[A, Labels.Empty.type](metric) {
+    def inc(): URIO[HasMetric, Unit] = access(_.inc())
 
-    def inc(value: Double): URIO[M, Unit] = metric.access(_.inc(value)).asInstanceOf[URIO[M, Unit]]
+    def dec(): URIO[HasMetric, Unit] = access(_.dec())
 
-    def dec(value: Double): URIO[M, Unit] = metric.access(_.dec(value)).asInstanceOf[URIO[M, Unit]]
+    def inc(value: Double): URIO[HasMetric, Unit] = access(_.inc(value))
 
-    def set(value: Double): URIO[M, Unit] = metric.access(_.set(value)).asInstanceOf[URIO[M, Unit]]
+    def dec(value: Double): URIO[HasMetric, Unit] = access(_.dec(value))
+
+    def set(value: Double): URIO[HasMetric, Unit] = access(_.set(value))
   }
 
-  implicit class GaugeNonEmptyLabelOps[M <: Has[_], A <: Labels](val metric: Gauge[A] { type Metric = M })
-      extends AnyVal {
-    def inc(labels: A): URIO[M, Unit] = metric.access(_.labels(labels.asSeq: _*).inc()).asInstanceOf[URIO[M, Unit]]
+  implicit def toGaugeNonEmptyLabelOps[B <: Labels.NonEmpty: Tag](metric: Gauge[B])(implicit
+    tag: Tag[metric.type]
+  ): GaugeNonEmptyLabelOps[metric.type, B] =
+    new GaugeNonEmptyLabelOps[metric.type, B](metric)
 
-    def dec(labels: A): URIO[M, Unit] = metric.access(_.labels(labels.asSeq: _*).dec()).asInstanceOf[URIO[M, Unit]]
+  final class GaugeNonEmptyLabelOps[A <: Gauge[B]: Tag, B <: Labels: Tag](metric: A)
+      extends MetricsOpsBase[A, B](metric) {
+    def inc(labels: B): URIO[HasMetric, Unit] = access(_.labels(labels.asSeq: _*).inc())
 
-    def inc(value: Double, labels: A): URIO[M, Unit] =
-      metric.access(_.labels(labels.asSeq: _*).inc(value)).asInstanceOf[URIO[M, Unit]]
+    def dec(labels: B): URIO[HasMetric, Unit] = access(_.labels(labels.asSeq: _*).dec())
 
-    def dec(value: Double, labels: A): URIO[M, Unit] =
-      metric.access(_.labels(labels.asSeq: _*).dec(value)).asInstanceOf[URIO[M, Unit]]
+    def inc(value: Double, labels: B): URIO[HasMetric, Unit] =
+      access(_.labels(labels.asSeq: _*).inc(value))
 
-    def set(value: Double, labels: A): URIO[M, Unit] =
-      metric.access(_.labels(labels.asSeq: _*).set(value)).asInstanceOf[URIO[M, Unit]]
+    def dec(value: Double, labels: B): URIO[HasMetric, Unit] =
+      access(_.labels(labels.asSeq: _*).dec(value))
+
+    def set(value: Double, labels: B): URIO[HasMetric, Unit] =
+      access(_.labels(labels.asSeq: _*).set(value))
   }
 
 }
 
-case class Summary[A <: Labels: Tag](val name: String, val help: String, labelNames: A) extends Metric[A] {
+case class Summary[A <: Labels](val name: String, val help: String, labelNames: A) extends Metric[A] {
   self =>
   override private[prometheus] type RealMetric = io.prometheus.client.Summary
 
@@ -120,26 +153,33 @@ case class Summary[A <: Labels: Tag](val name: String, val help: String, labelNa
 
 object Summary {
 
-  implicit class SummaryEmptyLabelOps[M <: Has[_]](val metric: Summary[Labels.Empty.type] { type Metric = M })
-      extends AnyVal {
-    final def timer[R <: M, E, B: Tag](zio: ZIO[R, E, B]): ZIO[R, E, B] =
-      metric.accessManaged(_.startTimer())(_.observeDuration()).ignore.use_(zio).asInstanceOf[ZIO[R, E, B]]
+  implicit def toSummaryEmptyLabelOps(metric: Summary[Labels.Empty.type])(implicit
+    tag: Tag[metric.type]
+  ): SummaryEmptyLabelOps[metric.type] =
+    new SummaryEmptyLabelOps[metric.type](metric)
 
-    final def observe(value: Double): URIO[M, Unit] =
-      metric.access(_.observe(value)).asInstanceOf[URIO[M, Unit]]
+  final class SummaryEmptyLabelOps[A <: Summary[Labels.Empty.type]: Tag](metric: A)
+      extends MetricsOpsBase[A, Labels.Empty.type](metric) {
+    def timer[R <: HasMetric, E, B: Tag](zio: ZIO[R, E, B]): ZIO[R, E, B] =
+      accessManaged(_.startTimer())(_.observeDuration()).ignore.use_(zio)
+
+    def observe(value: Double): URIO[HasMetric, Unit] =
+      access(_.observe(value))
   }
 
-  implicit class SummaryNonEmptyLabelOps[M <: Has[_], A <: Labels](val metric: Summary[A] { type Metric = M })
-      extends AnyVal {
-    final def timer[R <: M, E, B: Tag](zio: ZIO[R, E, B], labels: A): ZIO[R, E, B] =
-      metric
-        .accessManaged(_.labels(labels.asSeq: _*).startTimer())(_.observeDuration())
-        .ignore
-        .use_(zio)
-        .asInstanceOf[ZIO[R, E, B]]
+  implicit def toSummaryNonEmptyLabelOps[B <: Labels.NonEmpty: Tag](metric: Summary[B])(implicit
+    tag: Tag[metric.type]
+  ): SummaryNonEmptyLabelOps[metric.type, B] =
+    new SummaryNonEmptyLabelOps[metric.type, B](metric)
 
-    final def observe(value: Double, labels: A): URIO[M, Unit] =
-      metric.access(_.labels(labels.asSeq: _*).observe(value)).asInstanceOf[URIO[M, Unit]]
+  final class SummaryNonEmptyLabelOps[A <: Summary[B]: Tag, B <: Labels: Tag](metric: A)
+      extends MetricsOpsBase[A, B](metric) {
+    def timer[R <: HasMetric, E, C: Tag](zio: ZIO[R, E, C], labels: B): ZIO[R, E, C] =
+      accessManaged(_.labels(labels.asSeq: _*).startTimer())(_.observeDuration()).ignore
+        .use_(zio)
+
+    def observe(value: Double, labels: B): URIO[HasMetric, Unit] =
+      access(_.labels(labels.asSeq: _*).observe(value))
   }
 
 }
@@ -159,26 +199,33 @@ case class Histogram[A <: Labels: Tag](val name: String, val help: String, label
 
 object Histogram {
 
-  implicit class HistogramEmptyLabelOps[M <: Has[_]](val metric: Histogram[Labels.Empty.type] { type Metric = M })
-      extends AnyVal {
-    final def timer[R <: M, E, B: Tag](zio: ZIO[R, E, B]): ZIO[R, E, B] =
-      metric.accessManaged(_.startTimer())(_.observeDuration()).ignore.use_(zio).asInstanceOf[ZIO[R, E, B]]
+  implicit def toSummaryEmptyLabelOps(metric: Histogram[Labels.Empty.type])(implicit
+    tag: Tag[metric.type]
+  ): HistogramEmptyLabelOps[metric.type] =
+    new HistogramEmptyLabelOps[metric.type](metric)
 
-    final def observe(value: Double): URIO[M, Unit] =
-      metric.access(_.observe(value)).asInstanceOf[URIO[M, Unit]]
+  final class HistogramEmptyLabelOps[A <: Histogram[Labels.Empty.type]: Tag](metric: A)
+      extends MetricsOpsBase[A, Labels.Empty.type](metric) {
+    def timer[R <: HasMetric, E, B: Tag](zio: ZIO[R, E, B]): ZIO[R, E, B] =
+      accessManaged(_.startTimer())(_.observeDuration()).ignore.use_(zio)
+
+    def observe(value: Double): URIO[HasMetric, Unit] =
+      access(_.observe(value))
   }
 
-  implicit class HistogramNonEmptyLabelOps[M <: Has[_], A <: Labels](val metric: Histogram[A] { type Metric = M })
-      extends AnyVal {
-    final def timer[R <: M, E, B: Tag](zio: ZIO[R, E, B], labels: A) =
-      metric
-        .accessManaged(_.labels(labels.asSeq: _*).startTimer())(_.observeDuration())
-        .ignore
-        .use_(zio)
-        .asInstanceOf[ZIO[R, E, B]]
+  implicit def toHistogramNonEmptyLabelOps[B <: Labels.NonEmpty: Tag](metric: Histogram[B])(implicit
+    tag: Tag[metric.type]
+  ): HistogramNonEmptyLabelOps[metric.type, B] =
+    new HistogramNonEmptyLabelOps[metric.type, B](metric)
 
-    final def observe(value: Double, labels: A) =
-      metric.access(_.labels(labels.asSeq: _*).observe(value)).asInstanceOf[URIO[M, Unit]]
+  final class HistogramNonEmptyLabelOps[A <: Histogram[B]: Tag, B <: Labels: Tag](metric: A)
+      extends MetricsOpsBase[A, B](metric) {
+    def timer[R <: HasMetric, E, C: Tag](zio: ZIO[R, E, C], labels: B) =
+      accessManaged(_.labels(labels.asSeq: _*).startTimer())(_.observeDuration()).ignore
+        .use_(zio)
+
+    def observe(value: Double, labels: B) =
+      access(_.labels(labels.asSeq: _*).observe(value))
   }
 
 }

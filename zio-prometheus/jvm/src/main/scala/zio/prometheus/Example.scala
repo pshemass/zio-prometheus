@@ -1,15 +1,17 @@
 package zio.prometheus
 
 import zio._
+import zio.clock.Clock
 import zio.console.Console
 import zio.duration._
+import zio.prometheus.Example.requests
 
 object Example {
 
-  val requests           = Counter("requests_total", "Total requests.", Labels("route"))
-  val inProgressRequests = Gauge("in_progress_requests", "In progress requests.", Labels.Empty)
-  val receivedBytes      = Summary("requests_size_bytes", "Request size in bytes.", Labels.Empty)
-  val requestLatency     = Histogram("requests_latency_seconds", "Request latency in seconds.", Labels.Empty)
+  val requests           = Counter("_requests_total", "Total requests.", Labels("route"))
+  val inProgressRequests = Gauge("_in_progress_requests", "In progress requests.", Labels.Empty)
+  val receivedBytes      = Summary("_requests_size_bytes", "Request size in bytes.", Labels.Empty)
+  val requestLatency     = Histogram("_requests_latency_seconds", "Request latency in seconds.", Labels.Empty)
 
   type Metrics = requests.Metric with inProgressRequests.Metric with requestLatency.Metric with receivedBytes.Metric
 
@@ -19,61 +21,74 @@ object Example {
 
   def processRequests = ZIO.accessM[Has[Service]](_.get.processRequests)
 
-  def live = (requests.register ++ inProgressRequests.register ++ requestLatency.register ++ receivedBytes.register) >>>
-    ZLayer.fromFunction[Metrics, Service] { env =>
-      val requestLatency     = Example.requestLatency.fromEnv(env)
-      val requests           = Example.requests.fromEnv(env)
-      val inProgressRequests = Example.inProgressRequests.fromEnv(env)
-      val receivedBytes      = Example.receivedBytes.fromEnv(env)
-      new Service {
-        override def processRequests: UIO[Unit] =
-          for {
-            _ <- requests.inc(Labels("payment"))
-            _ <- inProgressRequests.inc()
-            _ <- inProgressRequests.dec()
+  def live =
+    (Clock.any ++ requests.register ++ inProgressRequests.register ++ requestLatency.register ++ receivedBytes.register) >>>
+      ZLayer.fromFunction[Clock with Metrics, Service] { env =>
+        val requestLatency1 = requestLatency.fromEnv(
+          env
+        ) //there is flaw in this approach you cannot do val requestLatency = Example.requestLatency.fromEnv(env)
+//      val requests           = Example.requests.fromEnv(env)
+//      val inProgressRequests = Example.inProgressRequests.fromEnv(env)
+//      val receivedBytes      = Example.receivedBytes.fromEnv(env)
+        new Service {
+          override def processRequests: UIO[Unit] =
+            for {
+//            _ <- requests.inc(Labels("payment"))
+//            _ <- inProgressRequests.inc()
+//            _ <- inProgressRequests.dec()
 //            _ <- receivedBytes.observe(12.02)
 //            _ <- receivedBytes.timer(ZIO.succeed(123).delay(3.seconds))
-//            _ <- requestLatency.observe(.01)
-//            _ <- requestLatency.timer(ZIO.succeed(123).delay(3.seconds))
-          } yield ()
+              _ <- requestLatency1.observe(.01)
+              _ <- requestLatency1.timer(ZIO.succeed(123).delay(3.seconds)).provide(env)
+            } yield ()
+
+        }
 
       }
-
-    }
 
 }
 
 object ExampleApp extends App {
 
   //try to replicate those examples https://github.com/prometheus/client_java
-  val requests           = Counter("requests_total", "Total requests.", Labels("route"))
-  val inProgressRequests = Gauge("in_progress_requests", "In progress requests.", Labels.Empty)
-  val receivedBytes      = Summary("requests_size_bytes", "Request size in bytes.", Labels.Empty)
-  val requestLatency     = Histogram("requests_latency_seconds", "Request latency in seconds.", Labels.Empty)
+  val requests            = Counter("requests_total", "Total requests.", Labels("route"))
+  val requests2           = Counter("requests_2_total", "Total requests.", Labels.Empty)
+  val inProgressRequests  = Gauge("in_progress_requests", "In progress requests.", Labels.Empty)
+  val inProgressRequests2 = Gauge("in_progress_2_requests", "In progress requests.", Labels("route"))
+  val receivedBytes       = Summary("requests_size_bytes", "Request size in bytes.", Labels.Empty)
+  val receivedBytes2      = Summary("requests_size_2_bytes", "Request size in bytes.", Labels("route"))
+  val requestLatency      = Histogram("requests_latency_seconds", "Request latency in seconds.", Labels.Empty)
+  val requestLatency2     = Histogram("requests_latency_2_seconds", "Request latency in seconds.", Labels("route"))
 
   override def run(args: List[String]): URIO[zio.ZEnv with Console, ExitCode] =
     myAppLogic
       .provideCustomLayer(
-        Registry.defaultRegistry >>> (
-          requests.register ++
+        (Clock.any ++ Registry.defaultRegistry) >>> (
+          requests2.register ++
+            requests.register ++
             inProgressRequests.register ++
-            requestLatency.register ++
+            inProgressRequests2.register ++
             receivedBytes.register ++
-            Example.live
+            receivedBytes2.register ++
+            requestLatency.register ++
+            requestLatency2.register ++
+            Example.live ++
+            JvmMetrics.register ++
+            HttpExporter.live(9999)
         )
       )
       .exitCode
 
   val myAppLogic =
     for {
-      _ <- requests.inc(Labels("payment"))
+      _ <- requests2.inc()
+      _ <- requests.inc(Labels("payments"))
       _ <- inProgressRequests.inc()
-      _ <- inProgressRequests.dec()
-      _ <- receivedBytes.observe(12.02)
-      _ <- receivedBytes.timer(ZIO.succeed(123).delay(3.seconds))
-      _ <- requestLatency.observe(.01)
-      _ <- requestLatency.timer(ZIO.succeed(123).delay(3.seconds))
-      _ <- Example.processRequests
+      _ <- inProgressRequests2.inc(Labels("payments"))
+      _ <- receivedBytes.observe(12.0)
+      _ <- receivedBytes2.observe(12.0, Labels("payments"))
+      _ <- requestLatency.observe(12.0)
+      _ <- requestLatency2.observe(12.0, Labels("payments"))
       _ <- ZIO.unit.forever
     } yield ()
 }

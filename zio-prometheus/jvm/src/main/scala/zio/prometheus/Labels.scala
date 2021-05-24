@@ -6,10 +6,11 @@ sealed trait Labels extends Product { self =>
 }
 
 object Labels {
-  def apply(value: String) = Label1(value)
+  def apply(value: String)                 = Label1(value)
   def apply(value: String, value1: String) = Label2(value, value1)
 
-  case object Empty extends Labels
-  case class Label1(value: String) extends Labels
-  case class Label2(value: String, value1: String) extends Labels
+  sealed trait NonEmpty                            extends Labels
+  case object Empty                                extends Labels
+  case class Label1(value: String)                 extends NonEmpty
+  case class Label2(value: String, value1: String) extends NonEmpty
 }
