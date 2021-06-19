@@ -2,7 +2,6 @@ package zio.prometheus
 
 import io.prometheus.client.{ Collector, CollectorRegistry }
 import zio.prometheus.Metric.MetricsOpsBase
-import zio.prometheus.Summary.SummaryNonEmptyLabelOps
 import zio.{ Has, Tag, URIO, ZIO, ZLayer, ZManaged }
 
 import scala.language.implicitConversions
@@ -19,6 +18,7 @@ object Metric {
 
   private[prometheus] abstract class MetricsOpsBase[A <: Metric[B]: Tag, B <: Labels: Tag](val metric: A) {
     type HasMetric = Has[Registered[A, B]]
+
     protected final def access(fn: A#RealMetric => Unit): URIO[HasMetric, Unit] =
       ZIO.access[HasMetric](env => fn(env.get.metric))
 

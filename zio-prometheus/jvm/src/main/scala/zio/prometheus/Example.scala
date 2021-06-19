@@ -2,9 +2,8 @@ package zio.prometheus
 
 import zio._
 import zio.clock.Clock
-import zio.console.Console
+import zio.console.{ Console, putStrLn }
 import zio.duration._
-import zio.prometheus.Example.requests
 
 object Example {
 
@@ -22,24 +21,26 @@ object Example {
   def processRequests = ZIO.accessM[Has[Service]](_.get.processRequests)
 
   def live =
-    (Clock.any ++ requests.register ++ inProgressRequests.register ++ requestLatency.register ++ receivedBytes.register) >>>
+    (Clock.any ++
+      Example.requests.register ++
+      Example.inProgressRequests.register ++
+      Example.requestLatency.register ++
+      Example.receivedBytes.register) >>>
       ZLayer.fromFunction[Clock with Metrics, Service] { env =>
-        val requestLatency1 = requestLatency.fromEnv(
-          env
-        ) //there is flaw in this approach you cannot do val requestLatency = Example.requestLatency.fromEnv(env)
-//      val requests           = Example.requests.fromEnv(env)
-//      val inProgressRequests = Example.inProgressRequests.fromEnv(env)
-//      val receivedBytes      = Example.receivedBytes.fromEnv(env)
+        val requestLatency     = Example.requestLatency.fromEnv(env)
+        val requests           = Example.requests.fromEnv(env)
+        val inProgressRequests = Example.inProgressRequests.fromEnv(env)
+        val receivedBytes      = Example.receivedBytes.fromEnv(env)
         new Service {
           override def processRequests: UIO[Unit] =
             for {
-//            _ <- requests.inc(Labels("payment"))
-//            _ <- inProgressRequests.inc()
-//            _ <- inProgressRequests.dec()
-//            _ <- receivedBytes.observe(12.02)
-//            _ <- receivedBytes.timer(ZIO.succeed(123).delay(3.seconds))
-              _ <- requestLatency1.observe(.01)
-              _ <- requestLatency1.timer(ZIO.succeed(123).delay(3.seconds)).provide(env)
+              _ <- requests.inc(Labels("payment"))
+              _ <- inProgressRequests.inc()
+              _ <- inProgressRequests.dec()
+              _ <- receivedBytes.observe(12.02)
+              _ <- receivedBytes.timer(ZIO.succeed(123).delay(3.seconds)).provide(env)
+              _ <- requestLatency.observe(.01)
+              _ <- requestLatency.timer(ZIO.succeed(123).delay(3.seconds)).provide(env)
             } yield ()
 
         }
@@ -89,6 +90,7 @@ object ExampleApp extends App {
       _ <- receivedBytes2.observe(12.0, Labels("payments"))
       _ <- requestLatency.observe(12.0)
       _ <- requestLatency2.observe(12.0, Labels("payments"))
+      _ <- putStrLn("open http://localhost:9999")
       _ <- ZIO.unit.forever
     } yield ()
 }
