@@ -23,7 +23,7 @@ addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 addCommandAlias("fix", "; all compile:scalafix test:scalafix; all scalafmtSbt scalafmtAll")
 addCommandAlias("check", "; scalafmtSbtCheck; scalafmtCheckAll; compile:scalafix --check; test:scalafix --check")
 
-val zioVersion        = "1.0.7"
+val zioVersion        = "1.0.10"
 val prometheusVersion = "0.10.0"
 
 lazy val root = project
@@ -45,6 +45,7 @@ lazy val zioPrometheus = crossProject(JSPlatform, JVMPlatform)
   .settings(
     libraryDependencies ++= Seq(
       "dev.zio"      %% "zio"                     % zioVersion,
+      "dev.zio"      %% "izumi-reflect"           % "2.0.0",
       "io.prometheus" % "simpleclient"            % prometheusVersion,
       "io.prometheus" % "simpleclient_httpserver" % prometheusVersion,
       "io.prometheus" % "simpleclient_hotspot"    % prometheusVersion,

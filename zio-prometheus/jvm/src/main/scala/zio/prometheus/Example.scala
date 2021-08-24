@@ -22,12 +22,12 @@ object Example {
 
   def live =
     (Clock.any ++
-      Example.requests.register ++
-      Example.inProgressRequests.register ++
-      Example.requestLatency.register ++
-      Example.receivedBytes.register) >>>
+      requests.register ++
+      inProgressRequests.register ++
+      requestLatency.register ++
+      receivedBytes.register) >>>
       ZLayer.fromFunction[Clock with Metrics, Service] { env =>
-        val requestLatency     = Example.requestLatency.fromEnv(env)
+        val requestLatency     = Example.this.requestLatency.fromEnv(env)
         val requests           = Example.requests.fromEnv(env)
         val inProgressRequests = Example.inProgressRequests.fromEnv(env)
         val receivedBytes      = Example.receivedBytes.fromEnv(env)
